@@ -1,0 +1,288 @@
+---
+title: "spatial_data_analysis"
+author: "dhurv_jani"
+date: "2024-03-29"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+
+# removes all the objects stored in the current workspace 
+rm(list = ls())
+
+```
+
+
+
+## Install the required packages.
+
+
+``` {r}
+library(maps)
+library(sf)
+library(terra)
+library(tidyterra)
+library(classInt)
+library(ggplot2)
+library(RColorBrewer)
+```
+
+
+## Outlines
+
+```{r}
+
+# world_sf
+world_sf <- st_as_sf(maps::map("world", plot = FALSE, fill = TRUE))
+world_otl_sf <- st_geometry(world_sf)
+plot(world_otl_sf)
+
+```
+
+
+```{r}
+
+# conus_sf
+conus_sf <- st_as_sf(map("state", plot = FALSE, fill = TRUE))
+conus_otl_sf <- st_geometry(conus_sf)
+plot(conus_otl_sf)
+
+```
+
+## Temperature in California
+
+```{r}
+if (!require("rspat")) remotes::install_github('rspatial/rspat')
+```
+
+
+```{r}
+library("remotes")
+library("rspat")
+```
+
+
+## Load the data
+
+```{r}
+
+library(rspat)
+d <- spat_data('precipitation')
+head(d)
+
+```
+
+
+## Compute annual precipitation
+
+```{r}
+
+mnts <- toupper(month.abb)
+d$prec <- rowSums(d[, mnts])
+plot(sort(d$prec), ylab="Annual precipitation (mm)", las=1, xlab="Stations")
+
+```
+
+
+## Plotting the map
+
+
+```{r}
+
+dsp <- vect(d, c("LONG", "LAT"), crs="+proj=longlat +datum=NAD83")
+CA <- spat_data("counties")
+
+# define groups for mapping
+cuts <- c(0,200,300,500,1000,3000)
+
+# set up a palette of interpolated colors
+blues <- colorRampPalette(c('yellow', 'orange', 'blue', 'dark blue'))
+plot(CA, col="light gray", lwd=4, border="dark gray")
+plot(dsp, "prec", type="interval", col=blues(10), legend=TRUE, cex=2,
+    breaks=cuts, add=TRUE, plg=list(x=-117.27, y=41.54))
+lines(CA)
+
+```
+
+
+## Transform longitude/latitude to planar coordinates, using the commonly used coordinate reference system for California (“Teale Albers”) to assure that our interpolation results will align with other data sets we have.
+
+```{r}
+
+TA <- "+proj=aea +lat_1=34 +lat_2=40.5 +lat_0=0 +lon_0=-120 +x_0=0 +y_0=-4000000 +datum=WGS84 +units=m"
+dta <- project(dsp, TA)
+cata <- project(CA, TA)
+
+```
+
+
+
+
+## Null Model
+
+```{r}
+
+RMSE <- function(observed, predicted) {
+  sqrt(mean((predicted - observed)^2, na.rm=TRUE))
+}
+
+```
+
+
+
+## Get the RMSE for the Null-model
+
+```{r}
+null <- RMSE(mean(dsp$prec), dsp$prec)
+null
+```
+So 435 is our target. Can we do better (have a smaller RMSE)?
+
+
+
+## Proximity Polygons
+
+```{r}
+
+v <- voronoi(dta)
+plot(v)
+points(dta)
+
+```
+
+
+## Let’s cut out what is not California, and map precipitation.
+
+```{r}
+vca <- crop(v, cata)
+plot(vca, "prec")
+```
+
+
+## Now, we can $rasterize$ the results in the following way:
+
+```{r}
+r <- rast(vca, res=10000)
+vr <- rasterize(vca, r, "prec")
+plot(vr)
+
+```
+
+## Use 5-fold cross-validation to evaluate this model.
+
+```{r}
+
+set.seed(5132015)
+kf <- sample(1:5, nrow(dta), replace=TRUE)
+rmse <- rep(NA, 5)
+for (k in 1:5) {
+  test <- dta[kf == k, ]
+  train <- dta[kf != k, ]
+  v <- voronoi(train)
+  p <- extract(v, test)
+  rmse[k] <- RMSE(test$prec, p$prec)
+}
+rmse
+mean(rmse)
+
+# relative model performance
+perf <- 1 - (mean(rmse) / null)
+round(perf, 3)
+
+
+```
+
+
+## Nearest Neighbours Interpolation
+
+```{r}
+library("gstat")
+```
+
+```{r}
+
+library(gstat)
+d <- data.frame(geom(dta)[,c("x", "y")], as.data.frame(dta))
+head(d)
+
+
+gs <- gstat(formula=prec~1, locations=~x+y, data=d, nmax=5, set=list(idp = 0))
+nn <- interpolate(r, gs, debug.level=0)
+nnmsk <- mask(nn, vr)
+plot(nnmsk, 1)
+
+```
+
+## Again cross-validate the results:
+
+```{r}
+
+rmsenn <- rep(NA, 5)
+for (k in 1:5) {
+  test <- d[kf == k, ]
+  train <- d[kf != k, ]
+  gscv <- gstat(formula=prec~1, locations=~x+y, data=train, nmax=5, set=list(idp = 0))
+  p <- predict(gscv, test, debug.level=0)$var1.pred
+  rmsenn[k] <- RMSE(test$prec, p)
+}
+rmsenn
+
+
+mean(rmsenn)
+
+1 - (mean(rmsenn) / null)
+```
+
+## Inverse Distance Weighted
+
+```{r}
+
+library(gstat)
+gs <- gstat(formula=prec~1, locations=~x+y, data=d)
+idw <- interpolate(r, gs, debug.level=0)
+idwr <- mask(idw, vr)
+plot(idwr, 1)
+
+```
+
+
+## Question 4: IDW generated rasters tend to have a noticeable artefact. What is that and what causes that?
+
+## Cross-validate again. We can use predict for the locations of the test points
+
+```{r}
+
+rmse <- rep(NA, 5)
+for (k in 1:5) {
+  test <- d[kf == k, ]
+  train <- d[kf != k, ]
+  gs <- gstat(formula=prec~1, locations=~x+y, data=train)
+  p <- predict(gs, test, debug.level=0)
+  rmse[k] <- RMSE(test$prec, p$var1.pred)
+}
+rmse
+
+mean(rmse)
+
+1 - (mean(rmse) / null)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
