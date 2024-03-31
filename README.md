@@ -31,6 +31,36 @@ To run the code in this repository, you'll need to install the following R packa
 4. **Evaluation**: Evaluate the performance of interpolation models using cross-validation techniques.
 5. **Interpretation**: Understand the generated models and their relative performance compared to null models.
 
+## Analysis/Plots
+
+### Annual Precipitation
+
+<img src="annual_precipitation.png" alt="Annual Precipitation" width="400" height="300">
+*Description: This image shows the annual precipitation distribution across California.*
+
+### Precipitation by Intensity
+
+<img src="precipitation_by_intensity.png" alt="Precipitation by Intensity" width="400" height="500">
+*Description: This image visualizes precipitation intensity levels in the different counties of California.*
+
+### Precipitation Plot
+
+<img src="precipitation_plot.png" alt="Precipitation Plot" width="400" height="500">
+*Description: This plot illustrates the spatial distribution of precipitation data.*
+
+### Proximity Polygon Plot
+
+<img src="proximity_polygon_plot.png" alt="Proximity Polygon Plot" width="400" height="500">
+*Description: This plot displays proximity polygons generated based on input point locations.*
+
+### Rasterized Plot
+
+<img src="rasterized_plot.png" alt="Rasterized Plot" width="400" height="500">
+*Description: This plot shows the rasterized representation of spatial data.*
+
+
+
+
 
 ## About Me
 
